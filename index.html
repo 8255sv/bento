@@ -105,6 +105,8 @@ tr.click:active{background:var(--acc-l)}
   <main id="view"></main>
 </div>
 <div id="modal-bg"><div id="modal"></div></div>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script>
 'use strict';
 /* ================= ユーティリティ ================= */
@@ -131,7 +133,7 @@ function load(){
   }catch(e){}
   return seed();
 }
-function save(){data.updatedAt=new Date().toISOString();try{localStorage.setItem(LS,JSON.stringify(data));}catch(e){}}
+function save(){data.updatedAt=new Date().toISOString();try{localStorage.setItem(LS,JSON.stringify(data));}catch(e){}try{if(typeof pushSync==='function')pushSync();}catch(e){}}
 function seed(){
   const d=blank();d.settings.sampleNote=true;
   const ing=(name,cat,price,amount,unit,kcal,kcalPer)=>{const o={id:uid()+Math.random().toString(36).slice(2,4),name,cat,price,amount,unit,kcal:kcal||0,kcalPer:kcalPer||0};d.ingredients.push(o);return o;};
@@ -590,7 +592,20 @@ function delDish(id){
 /* ---------- 設定・データ ---------- */
 function viewDataMst(){
   const fsOK=!!window.showSaveFilePicker;
-  let h='<div class="card"><h3 style="margin-top:0">端末間のデータ同期</h3>'
+  let h='<div class="card"><h3 style="margin-top:0">🔄 自動同期（全端末でデータ共有）</h3>'
+    +'<div class="muted" style="margin-bottom:6px">状態: <b id="sync-status">'+esc(syncStatus)+'</b></div>';
+  if(!syncCode){
+    h+='<div class="muted" style="margin-bottom:8px">オンにすると、保存のたびにクラウドへ自動保存され、同じ同期コードを入れた端末すべてに反映されます。最初の端末は「同期を開始」、2台目以降は「コードを入力して参加」を選んでください。</div>'
+      +'<button class="btn sm" onclick="createSync()">この端末のデータで同期を開始</button> '
+      +'<button class="btn sm ghost" onclick="joinSync()">同期コードを入力して参加</button>';
+  }else{
+    h+='<div class="muted">同期コード（他の端末で「参加」時にこのコードを入力）:</div>'
+      +'<input readonly value="'+esc(syncCode)+'" onfocus="this.select()" style="margin:6px 0;font-size:.8rem">'
+      +'<button class="btn sm ghost" onclick="copySyncCode()">📋 コードをコピー</button> '
+      +'<button class="btn sm gray" onclick="leaveSync()">同期を解除</button>';
+  }
+  h+='</div>';
+  h+='<div class="card"><h3 style="margin-top:0">ファイル同期（手動・バックアップ用）</h3>'
     +'<div class="muted" style="margin-bottom:8px">iCloud Driveなどの共有フォルダに同期ファイル(JSON)を置き、各端末で「保存」「読み込み」して同期します。<br>この端末の最終更新: <b>'+fmtTS(data.updatedAt)+'</b></div>';
   if(fsOK){
     h+='<div class="muted" style="margin-bottom:6px">連携中のファイル: <b id="sync-name">'+(syncHandle?esc(syncHandle.name):'未連携')+'</b></div>'
@@ -627,6 +642,102 @@ async function exportData(){
   a.href=URL.createObjectURL(blob);
   a.download=name;
   a.click();URL.revokeObjectURL(a.href);
+}
+
+/* ---------- 自動同期 (Firebase Firestore) ---------- */
+const FB_CONFIG={apiKey:'AIzaSyDCJU7kAOEZysyIJhRKL8hU7cqf2-OgwQ4',authDomain:'bento-sync-934b4.firebaseapp.com',projectId:'bento-sync-934b4',appId:'1:925748540098:web:207d23d1fcbcc7fb1dc15b'};
+const SYNC_KEY='bentoSyncCode';
+let syncCode='';try{syncCode=localStorage.getItem(SYNC_KEY)||'';}catch(e){}
+let fbDoc=null,fbUnsub=null,applyingRemote=false,pushTimer=null;
+let syncStatus=syncCode?'接続中...':'オフ';
+function fbAvailable(){return typeof firebase!=='undefined'&&!!firebase.firestore;}
+function fbInit(){if(!firebase.apps.length)firebase.initializeApp(FB_CONFIG);return firebase.firestore();}
+function updSyncStatus(){const el=$('sync-status');if(el)el.textContent=syncStatus;}
+function applyRemote(remote){
+  try{
+    const d=JSON.parse(remote.json);
+    if(!d||!Array.isArray(d.ingredients)||!Array.isArray(d.records))return false;
+    d.settings=Object.assign({targetRate:40,sampleNote:false},d.settings);
+    applyingRemote=true;data=d;
+    try{localStorage.setItem(LS,JSON.stringify(data));}catch(e){}
+    applyingRemote=false;
+    return true;
+  }catch(e){applyingRemote=false;return false;}
+}
+function startSync(){
+  if(!syncCode)return;
+  if(!fbAvailable()){syncStatus='接続不可（通信環境を確認して再読み込み）';updSyncStatus();return;}
+  try{
+    fbDoc=fbInit().collection('stores').doc(syncCode);
+    if(fbUnsub)fbUnsub();
+    fbUnsub=fbDoc.onSnapshot(snap=>{
+      if(snap.metadata.hasPendingWrites)return;
+      if(!snap.exists){pushSync();return;}
+      const remote=snap.data();
+      if(remote&&remote.updatedAt&&(!data.updatedAt||remote.updatedAt>data.updatedAt)){
+        if(applyRemote(remote)){syncStatus='同期済み（'+fmtTS(remote.updatedAt)+'）';render();return;}
+      }
+      syncStatus='同期済み（'+fmtTS(data.updatedAt)+'）';updSyncStatus();
+    },err=>{syncStatus='エラー：'+((err&&err.code)||'接続失敗');updSyncStatus();});
+  }catch(e){syncStatus='エラー';updSyncStatus();}
+}
+function pushSync(){
+  if(!fbDoc||applyingRemote)return;
+  clearTimeout(pushTimer);
+  pushTimer=setTimeout(()=>{
+    if(!fbDoc)return;
+    fbDoc.set({json:JSON.stringify(data),updatedAt:data.updatedAt||new Date().toISOString()})
+      .then(()=>{syncStatus='同期済み（'+fmtTS(data.updatedAt)+'）';updSyncStatus();})
+      .catch(()=>{syncStatus='送信待ち（オフライン）';updSyncStatus();});
+  },400);
+}
+function newSyncCode(){
+  const chars='abcdefghijklmnopqrstuvwxyz0123456789';let s='';
+  const a=new Uint8Array(24);
+  if(window.crypto&&crypto.getRandomValues)crypto.getRandomValues(a);
+  else for(let i=0;i<24;i++)a[i]=Math.random()*256|0;
+  for(const v of a)s+=chars[v%36];
+  return s;
+}
+function createSync(){
+  if(!fbAvailable()){alert('同期サービスに接続できません。インターネット接続を確認してページを再読み込みしてください。');return;}
+  syncCode=newSyncCode();
+  try{localStorage.setItem(SYNC_KEY,syncCode);}catch(e){}
+  syncStatus='接続中...';
+  startSync();pushSync();render();
+}
+async function joinSync(){
+  if(!fbAvailable()){alert('同期サービスに接続できません。インターネット接続を確認してページを再読み込みしてください。');return;}
+  const c=prompt('他の端末に表示されている「同期コード」を入力してください');
+  if(!c)return;
+  const code=c.trim().toLowerCase();
+  if(code.length<20){alert('コードが短いようです。コピー＆ペーストで正確に入力してください。');return;}
+  try{
+    const ref=fbInit().collection('stores').doc(code);
+    const snap=await ref.get();
+    syncCode=code;
+    try{localStorage.setItem(SYNC_KEY,code);}catch(e){}
+    let applied=false;
+    if(snap.exists){
+      if(confirm('同期データが見つかりました。この端末のデータを同期データに置き換えますか？\n（キャンセルすると、逆にこの端末のデータを同期データとして全端末に配信します）')){
+        applied=applyRemote(snap.data());
+      }
+    }
+    startSync();
+    if(!applied){data.updatedAt=new Date().toISOString();try{localStorage.setItem(LS,JSON.stringify(data));}catch(e){}pushSync();}
+    render();
+  }catch(e){syncCode='';try{localStorage.removeItem(SYNC_KEY);}catch(_){}alert('接続できませんでした：'+e.message);}
+}
+function leaveSync(){
+  if(!confirm('自動同期を解除しますか？（この端末とクラウドのデータは消えません）'))return;
+  if(fbUnsub){fbUnsub();fbUnsub=null;}
+  fbDoc=null;syncCode='';syncStatus='オフ';
+  try{localStorage.removeItem(SYNC_KEY);}catch(e){}
+  render();
+}
+function copySyncCode(){
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(syncCode).then(()=>alert('コピーしました'),()=>prompt('このコードをコピーしてください',syncCode));
+  else prompt('このコードをコピーしてください',syncCode);
 }
 
 /* ---------- 同期ファイル連携 (PC Chrome/Edge) ---------- */
@@ -699,7 +810,7 @@ function wipeAll(){
 /* ================= モーダル ================= */
 function showModal(html){$('modal').innerHTML=html;$('modal-bg').style.display='flex';}
 function closeModal(){$('modal-bg').style.display='none';$('modal').innerHTML='';}
-window.addEventListener('load',()=>{render();if(window.showSaveFilePicker&&window.indexedDB)restoreSyncHandle();});
+window.addEventListener('load',()=>{render();if(window.showSaveFilePicker&&window.indexedDB)restoreSyncHandle();startSync();});
 </script>
 </body>
 </html>
