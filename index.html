@@ -83,7 +83,7 @@ tr.click:active{background:var(--acc-l)}
 .note{background:#fdf6e3;border:1px solid #eadfa8;border-radius:10px;padding:9px 12px;font-size:.8rem;display:flex;gap:8px;align-items:center;margin-bottom:10px}
 .note button{border:none;background:none;cursor:pointer;color:var(--sub);font-size:1rem;margin-left:auto}
 .chart{display:flex;align-items:flex-end;gap:2px;height:130px;padding:4px 2px 0;border-bottom:1px solid var(--line)}
-.bar{flex:1;position:relative;min-width:3px;background:transparent}
+.bar{flex:1;position:relative;min-width:3px;height:100%;background:transparent}
 .bar .s{width:100%;background:#e9cfa8;border-radius:2px 2px 0 0;position:absolute;bottom:0}
 .bar .c{width:100%;background:var(--acc);opacity:.85;border-radius:2px 2px 0 0;position:absolute;bottom:0}
 .chart-x{display:flex;gap:2px;font-size:.6rem;color:var(--sub);margin-bottom:12px}
@@ -791,5 +791,5 @@ function closeModal(){$('modal-bg').style.display='none';$('modal').innerHTML=''
 window.addEventListener('load',()=>{render();if(window.showSaveFilePicker&&window.indexedDB)restoreSyncHandle();startSync();});
 </script>
 </body>
-<!-- build 2026-07-04a -->
+<!-- build 2026-07-04b -->
 </html>
