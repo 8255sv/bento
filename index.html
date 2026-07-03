@@ -400,7 +400,11 @@ function viewMon(){
     +stat('粗利',yen0(sales-cost))
     +stat('原価率',sales>0?pct(cost/sales*100):'-')
     +stat('販売数',count+'個')
-    +stat('営業日数',active.length+'日')+'</div>';
+    +stat('営業日数',active.length+'日')
+    +stat('平均原価/個',count>0?yen(cost/count):'-')
+    +stat('平均単価/個',count>0?yen(sales/count):'-')
+    +stat('平均粗利/個',count>0?yen((sales-cost)/count):'-')
+    +stat('日平均売上',active.length>0?yen0(sales/active.length):'-')+'</div>';
   if(!active.length){h+='<div class="empty">'+mdisp(selMonth)+' の記録はありません</div>';return h;}
   /* グラフ */
   const max=Math.max(...days.map(x=>x.sales),1);
@@ -428,10 +432,12 @@ function viewMon(){
     const o=byName[r.name]||(byName[r.name]={count:0,sales:0,cost:0,kcal:0});
     o.count+=r.count;o.sales+=r.price*r.count;o.cost+=c*r.count;o.kcal+=recKcal(r)*r.count;
   });
-  h+='<h3>弁当別集計</h3><div class="scroll"><table><tr><th>弁当名</th><th class="num">個数</th><th class="num">売上</th><th class="num">原価</th><th class="num">粗利</th><th class="num">原価率</th><th class="num">カロリー/個</th></tr>';
+  h+='<h3>弁当別集計</h3><div class="scroll"><table><tr><th>弁当名</th><th class="num">個数</th><th class="num">売上</th><th class="num">原価</th><th class="num">原価/個</th><th class="num">粗利</th><th class="num">原価率</th><th class="num">カロリー/個</th></tr>';
   Object.entries(byName).sort((a,b)=>b[1].sales-a[1].sales).forEach(([name,o])=>{
     const rate=o.sales>0?o.cost/o.sales*100:NaN;
-    h+='<tr><td>'+esc(name)+'</td><td class="num">'+o.count+'</td><td class="num">'+yen0(o.sales)+'</td><td class="num">'+yen0(o.cost)+'</td><td class="num">'+yen0(o.sales-o.cost)+'</td>'
+    h+='<tr><td>'+esc(name)+'</td><td class="num">'+o.count+'</td><td class="num">'+yen0(o.sales)+'</td><td class="num">'+yen0(o.cost)+'</td>'
+      +'<td class="num">'+(o.count>0?yen(o.cost/o.count):'-')+'</td>'
+      +'<td class="num">'+yen0(o.sales-o.cost)+'</td>'
       +'<td class="num"><span class="badge '+rateClass(rate)+'">'+pct(rate)+'</span></td>'
       +'<td class="num">'+fmtK(o.count>0?o.kcal/o.count:0)+'</td></tr>';
   });
